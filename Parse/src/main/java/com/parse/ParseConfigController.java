@@ -8,40 +8,36 @@
  */
 package com.parse;
 
+import com.parse.boltsinternal.Task;
 import org.json.JSONObject;
 
-import bolts.Continuation;
-import bolts.Task;
+class ParseConfigController {
 
-/** package */ class ParseConfigController {
+    private final ParseHttpClient restClient;
+    private final ParseCurrentConfigController currentConfigController;
 
-  private ParseCurrentConfigController currentConfigController;
-  private final ParseHttpClient restClient;
+    public ParseConfigController(
+            ParseHttpClient restClient, ParseCurrentConfigController currentConfigController) {
+        this.restClient = restClient;
+        this.currentConfigController = currentConfigController;
+    }
 
-  public ParseConfigController(ParseHttpClient restClient,
-      ParseCurrentConfigController currentConfigController) {
-    this.restClient = restClient;
-    this.currentConfigController = currentConfigController;
-  }
-  /* package */ ParseCurrentConfigController getCurrentConfigController() {
-    return currentConfigController;
-  }
+    /* package */ ParseCurrentConfigController getCurrentConfigController() {
+        return currentConfigController;
+    }
 
-  public Task<ParseConfig> getAsync(String sessionToken) {
-    final ParseRESTCommand command = ParseRESTConfigCommand.fetchConfigCommand(sessionToken);
-    return command.executeAsync(restClient).onSuccessTask(new Continuation<JSONObject, Task<ParseConfig>>() {
-      @Override
-      public Task<ParseConfig> then(Task<JSONObject> task) throws Exception {
-        JSONObject result = task.getResult();
+    public Task<ParseConfig> getAsync(String sessionToken) {
+        final ParseRESTCommand command = ParseRESTConfigCommand.fetchConfigCommand(sessionToken);
+        return command.executeAsync(restClient)
+                .onSuccessTask(
+                        task -> {
+                            JSONObject result = task.getResult();
 
-        final ParseConfig config = ParseConfig.decode(result, ParseDecoder.get());
-        return currentConfigController.setCurrentConfigAsync(config).continueWith(new Continuation<Void, ParseConfig>() {
-          @Override
-          public ParseConfig then(Task<Void> task) throws Exception {
-            return config;
-          }
-        });
-      }
-    });
-  }
+                            final ParseConfig config =
+                                    ParseConfig.decode(result, ParseDecoder.get());
+                            return currentConfigController
+                                    .setCurrentConfigAsync(config)
+                                    .continueWith(task1 -> config);
+                        });
+    }
 }

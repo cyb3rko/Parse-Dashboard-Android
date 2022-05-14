@@ -8,283 +8,258 @@
  */
 package com.parse;
 
+import com.parse.boltsinternal.Task;
 import java.util.Arrays;
 import java.util.Map;
 
-import bolts.Continuation;
-import bolts.Task;
+class CachedCurrentUserController implements ParseCurrentUserController {
 
-/** package */ class CachedCurrentUserController implements ParseCurrentUserController {
+    /**
+     * Lock used to synchronize current user modifications and access.
+     *
+     * <p>Note about lock ordering:
+     *
+     * <p>You must NOT acquire the ParseUser instance mutex (the "mutex" field in ParseObject) while
+     * holding this static initialization lock. Doing so will cause a deadlock.
+     */
+    private final Object mutex = new Object();
 
-  /**
-   * Lock used to synchronize current user modifications and access.
-   *
-   * Note about lock ordering:
-   *
-   * You must NOT acquire the ParseUser instance mutex (the "mutex" field in ParseObject) while
-   * holding this static initialization lock. Doing so will cause a deadlock. Here's an example:
-   * https://phabricator.fb.com/P17182641
-   */
-  private final Object mutex = new Object();
-  private final TaskQueue taskQueue = new TaskQueue();
+    private final TaskQueue taskQueue = new TaskQueue();
 
-  private final ParseObjectStore<ParseUser> store;
+    private final ParseObjectStore<ParseUser> store;
 
-  /* package */ ParseUser currentUser;
-  // Whether currentUser is known to match the serialized version on disk. This is useful for saving
-  // a filesystem check if you try to load currentUser frequently while there is none on disk.
-  /* package */ boolean currentUserMatchesDisk = false;
+    /* package */ ParseUser currentUser;
+    // Whether currentUser is known to match the serialized version on disk. This is useful for
+    // saving
+    // a filesystem check if you try to load currentUser frequently while there is none on disk.
+    /* package */ boolean currentUserMatchesDisk = false;
 
-  public CachedCurrentUserController(ParseObjectStore<ParseUser> store) {
-    this.store = store;
-  }
+    public CachedCurrentUserController(ParseObjectStore<ParseUser> store) {
+        this.store = store;
+    }
 
-  @Override
-  public Task<Void> setAsync(final ParseUser user) {
-    return taskQueue.enqueue(new Continuation<Void, Task<Void>>() {
-      @Override
-      public Task<Void> then(Task<Void> toAwait) throws Exception {
-        return toAwait.continueWithTask(new Continuation<Void, Task<Void>>() {
-          @Override
-          public Task<Void> then(Task<Void> task) throws Exception {
-            ParseUser oldCurrentUser;
-            synchronized (mutex) {
-              oldCurrentUser = currentUser;
+    @Override
+    public Task<Void> setAsync(final ParseUser user) {
+        return taskQueue.enqueue(
+                toAwait ->
+                        toAwait.continueWithTask(
+                                        task -> {
+                                            ParseUser oldCurrentUser;
+                                            synchronized (mutex) {
+                                                oldCurrentUser = currentUser;
+                                            }
+
+                                            if (oldCurrentUser != null && oldCurrentUser != user) {
+                                                // We don't need to revoke the token since we're not
+                                                // explicitly calling logOut
+                                                // We don't need to remove persisted files since
+                                                // we're overwriting them
+                                                return oldCurrentUser
+                                                        .logOutAsync(false)
+                                                        .continueWith(
+                                                                task1 -> {
+                                                                    return null; // ignore errors
+                                                                });
+                                            }
+                                            return task;
+                                        })
+                                .onSuccessTask(
+                                        task -> {
+                                            user.setIsCurrentUser(true);
+                                            return user.synchronizeAllAuthDataAsync();
+                                        })
+                                .onSuccessTask(
+                                        task ->
+                                                store.setAsync(user)
+                                                        .continueWith(
+                                                                task12 -> {
+                                                                    synchronized (mutex) {
+                                                                        currentUserMatchesDisk =
+                                                                                !task12.isFaulted();
+                                                                        currentUser = user;
+                                                                    }
+                                                                    return null;
+                                                                })));
+    }
+
+    @Override
+    public Task<Void> setIfNeededAsync(ParseUser user) {
+        synchronized (mutex) {
+            if (!user.isCurrentUser() || currentUserMatchesDisk) {
+                return Task.forResult(null);
             }
+        }
 
-            if (oldCurrentUser != null && oldCurrentUser != user) {
-              // We don't need to revoke the token since we're not explicitly calling logOut
-              // We don't need to remove persisted files since we're overwriting them
-              return oldCurrentUser.logOutAsync(false).continueWith(new Continuation<Void, Void>() {
-                @Override
-                public Void then(Task<Void> task) throws Exception {
-                  return null; // ignore errors
-                }
-              });
+        return setAsync(user);
+    }
+
+    @Override
+    public Task<ParseUser> getAsync() {
+        return getAsync(ParseUser.isAutomaticUserEnabled());
+    }
+
+    @Override
+    public Task<Boolean> existsAsync() {
+        synchronized (mutex) {
+            if (currentUser != null) {
+                return Task.forResult(true);
             }
-            return task;
-          }
-        }).onSuccessTask(new Continuation<Void, Task<Void>>() {
-          @Override
-          public Task<Void> then(Task<Void> task) throws Exception {
+        }
+
+        return taskQueue.enqueue(toAwait -> toAwait.continueWithTask(task -> store.existsAsync()));
+    }
+
+    @Override
+    public boolean isCurrent(ParseUser user) {
+        synchronized (mutex) {
+            return currentUser == user;
+        }
+    }
+
+    @Override
+    public void clearFromMemory() {
+        synchronized (mutex) {
+            currentUser = null;
+            currentUserMatchesDisk = false;
+        }
+    }
+
+    @Override
+    public void clearFromDisk() {
+        synchronized (mutex) {
+            currentUser = null;
+            currentUserMatchesDisk = false;
+        }
+        try {
+            ParseTaskUtils.wait(store.deleteAsync());
+        } catch (ParseException e) {
+            // ignored
+        }
+    }
+
+    @Override
+    public Task<String> getCurrentSessionTokenAsync() {
+        return getAsync(false)
+                .onSuccess(
+                        task -> {
+                            ParseUser user = task.getResult();
+                            return user != null ? user.getSessionToken() : null;
+                        });
+    }
+
+    @Override
+    public Task<Void> logOutAsync() {
+        return taskQueue.enqueue(
+                toAwait -> {
+                    // We can parallelize disk and network work, but only after we restore the
+                    // current user from
+                    // disk.
+                    final Task<ParseUser> userTask = getAsync(false);
+                    return Task.whenAll(Arrays.asList(userTask, toAwait))
+                            .continueWithTask(
+                                    task -> {
+                                        Task<Void> logOutTask =
+                                                userTask.onSuccessTask(
+                                                        task1 -> {
+                                                            ParseUser user = task1.getResult();
+                                                            if (user == null) {
+                                                                return task1.cast();
+                                                            }
+                                                            return user.logOutAsync();
+                                                        });
+
+                                        Task<Void> diskTask =
+                                                store.deleteAsync()
+                                                        .continueWith(
+                                                                task12 -> {
+                                                                    boolean deleted =
+                                                                            !task12.isFaulted();
+                                                                    synchronized (mutex) {
+                                                                        currentUserMatchesDisk =
+                                                                                deleted;
+                                                                        currentUser = null;
+                                                                    }
+                                                                    return null;
+                                                                });
+                                        return Task.whenAll(Arrays.asList(logOutTask, diskTask));
+                                    });
+                });
+    }
+
+    @Override
+    public Task<ParseUser> getAsync(final boolean shouldAutoCreateUser) {
+        synchronized (mutex) {
+            if (currentUser != null) {
+                return Task.forResult(currentUser);
+            }
+        }
+
+        return taskQueue.enqueue(
+                toAwait ->
+                        toAwait.continueWithTask(
+                                ignored -> {
+                                    ParseUser current;
+                                    boolean matchesDisk;
+                                    synchronized (mutex) {
+                                        current = currentUser;
+                                        matchesDisk = currentUserMatchesDisk;
+                                    }
+
+                                    if (current != null) {
+                                        return Task.forResult(current);
+                                    }
+
+                                    if (matchesDisk) {
+                                        if (shouldAutoCreateUser) {
+                                            return Task.forResult(lazyLogIn());
+                                        }
+                                        return null;
+                                    }
+
+                                    return store.getAsync()
+                                            .continueWith(
+                                                    task -> {
+                                                        ParseUser current1 = task.getResult();
+                                                        boolean matchesDisk1 = !task.isFaulted();
+
+                                                        synchronized (mutex) {
+                                                            currentUser = current1;
+                                                            currentUserMatchesDisk = matchesDisk1;
+                                                        }
+
+                                                        if (current1 != null) {
+                                                            synchronized (current1.mutex) {
+                                                                current1.setIsCurrentUser(true);
+                                                            }
+                                                            return current1;
+                                                        }
+
+                                                        if (shouldAutoCreateUser) {
+                                                            return lazyLogIn();
+                                                        }
+                                                        return null;
+                                                    });
+                                }));
+    }
+
+    private ParseUser lazyLogIn() {
+        Map<String, String> authData = ParseAnonymousUtils.getAuthData();
+        return lazyLogIn(ParseAnonymousUtils.AUTH_TYPE, authData);
+    }
+
+    /* package for tests */ ParseUser lazyLogIn(String authType, Map<String, String> authData) {
+        // Note: if authType != ParseAnonymousUtils.AUTH_TYPE the user is not "lazy".
+        ParseUser user = ParseObject.create(ParseUser.class);
+        synchronized (user.mutex) {
             user.setIsCurrentUser(true);
-            return user.synchronizeAllAuthDataAsync();
-          }
-        }).onSuccessTask(new Continuation<Void, Task<Void>>() {
-          @Override
-          public Task<Void> then(Task<Void> task) throws Exception {
-            return store.setAsync(user).continueWith(new Continuation<Void, Void>() {
-              @Override
-              public Void then(Task<Void> task) throws Exception {
-                synchronized (mutex) {
-                  currentUserMatchesDisk = !task.isFaulted();
-                  currentUser = user;
-                }
-                return null;
-              }
-            });
-          }
-        });
-      }
-    });
-  }
+            user.putAuthData(authType, authData);
+        }
 
-  @Override
-  public Task<Void> setIfNeededAsync(ParseUser user) {
-    synchronized (mutex) {
-      if (!user.isCurrentUser() || currentUserMatchesDisk) {
-        return Task.forResult(null);
-      }
+        synchronized (mutex) {
+            currentUserMatchesDisk = false;
+            currentUser = user;
+        }
+
+        return user;
     }
-
-    return setAsync(user);
-  }
-
-  @Override
-  public Task<ParseUser> getAsync() {
-    return getAsync(ParseUser.isAutomaticUserEnabled());
-  }
-
-  @Override
-  public Task<Boolean> existsAsync() {
-    synchronized (mutex) {
-      if (currentUser != null) {
-        return Task.forResult(true);
-      }
-    }
-
-    return taskQueue.enqueue(new Continuation<Void, Task<Boolean>>() {
-      @Override
-      public Task<Boolean> then(Task<Void> toAwait) throws Exception {
-        return toAwait.continueWithTask(new Continuation<Void, Task<Boolean>>() {
-          @Override
-          public Task<Boolean> then(Task<Void> task) throws Exception {
-            return store.existsAsync();
-          }
-        });
-      }
-    });
-  }
-
-  @Override
-  public boolean isCurrent(ParseUser user) {
-    synchronized (mutex) {
-      return currentUser == user;
-    }
-  }
-
-  @Override
-  public void clearFromMemory() {
-    synchronized (mutex) {
-      currentUser = null;
-      currentUserMatchesDisk = false;
-    }
-  }
-
-  @Override
-  public void clearFromDisk() {
-    synchronized (mutex) {
-      currentUser = null;
-      currentUserMatchesDisk = false;
-    }
-    try {
-      ParseTaskUtils.wait(store.deleteAsync());
-    } catch (ParseException e) {
-      // ignored
-    }
-  }
-
-  @Override
-  public Task<String> getCurrentSessionTokenAsync() {
-    return getAsync(false).onSuccess(new Continuation<ParseUser, String>() {
-      @Override
-      public String then(Task<ParseUser> task) throws Exception {
-        ParseUser user = task.getResult();
-        return user != null ? user.getSessionToken() : null;
-      }
-    });
-  }
-
-  @Override
-  public Task<Void> logOutAsync() {
-    return taskQueue.enqueue(new Continuation<Void, Task<Void>>() {
-      @Override
-      public Task<Void> then(Task<Void> toAwait) throws Exception {
-        // We can parallelize disk and network work, but only after we restore the current user from
-        // disk.
-        final Task<ParseUser> userTask = getAsync(false);
-        return Task.whenAll(Arrays.asList(userTask, toAwait)).continueWithTask(new Continuation<Void, Task<Void>>() {
-          @Override
-          public Task<Void> then(Task<Void> task) throws Exception {
-            Task<Void> logOutTask = userTask.onSuccessTask(new Continuation<ParseUser, Task<Void>>() {
-              @Override
-              public Task<Void> then(Task<ParseUser> task) throws Exception {
-                ParseUser user = task.getResult();
-                if (user == null) {
-                  return task.cast();
-                }
-                return user.logOutAsync();
-              }
-            });
-
-            Task<Void> diskTask = store.deleteAsync().continueWith(new Continuation<Void, Void>() {
-              @Override
-              public Void then(Task<Void> task) throws Exception {
-                boolean deleted = !task.isFaulted();
-                synchronized (mutex) {
-                  currentUserMatchesDisk = deleted;
-                  currentUser = null;
-                }
-                return null;
-              }
-            });
-            return Task.whenAll(Arrays.asList(logOutTask, diskTask));
-          }
-        });
-      }
-    });
-  }
-
-  @Override
-  public Task<ParseUser> getAsync(final boolean shouldAutoCreateUser) {
-    synchronized (mutex) {
-      if (currentUser != null) {
-        return Task.forResult(currentUser);
-      }
-    }
-
-    return taskQueue.enqueue(new Continuation<Void, Task<ParseUser>>() {
-      @Override
-      public Task<ParseUser> then(Task<Void> toAwait) throws Exception {
-        return toAwait.continueWithTask(new Continuation<Void, Task<ParseUser>>() {
-          @Override
-          public Task<ParseUser> then(Task<Void> ignored) throws Exception {
-            ParseUser current;
-            boolean matchesDisk;
-            synchronized (mutex) {
-              current = currentUser;
-              matchesDisk = currentUserMatchesDisk;
-            }
-
-            if (current != null) {
-              return Task.forResult(current);
-            }
-
-            if (matchesDisk) {
-              if (shouldAutoCreateUser) {
-                return Task.forResult(lazyLogIn());
-              }
-              return null;
-            }
-
-            return store.getAsync().continueWith(new Continuation<ParseUser, ParseUser>() {
-              @Override
-              public ParseUser then(Task<ParseUser> task) throws Exception {
-                ParseUser current = task.getResult();
-                boolean matchesDisk = !task.isFaulted();
-
-                synchronized (mutex) {
-                  currentUser = current;
-                  currentUserMatchesDisk = matchesDisk;
-                }
-
-                if (current != null) {
-                  synchronized (current.mutex) {
-                    current.setIsCurrentUser(true);
-                  }
-                  return current;
-                }
-
-                if (shouldAutoCreateUser) {
-                  return lazyLogIn();
-                }
-                return null;
-              }
-            });
-          }
-        });
-      }
-    });
-  }
-
-  private ParseUser lazyLogIn() {
-    Map<String, String> authData = ParseAnonymousUtils.getAuthData();
-    return lazyLogIn(ParseAnonymousUtils.AUTH_TYPE, authData);
-  }
-
-  /* package for tests */ ParseUser lazyLogIn(String authType, Map<String, String> authData) {
-    // Note: if authType != ParseAnonymousUtils.AUTH_TYPE the user is not "lazy".
-    ParseUser user = ParseObject.create(ParseUser.class);
-    synchronized (user.mutex) {
-      user.setIsCurrentUser(true);
-      user.putAuthData(authType, authData);
-    }
-
-    synchronized (mutex) {
-      currentUserMatchesDisk = false;
-      currentUser = user;
-    }
-
-    return user;
-  }
 }

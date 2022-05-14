@@ -8,21 +8,19 @@
  */
 package com.parse;
 
+import java.lang.annotation.Documented;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Inherited;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.annotation.Target;
 
-/**
- * Associates a class name for a subclass of ParseObject.
- */
-@Target({ ElementType.TYPE })
+/** Associates a class name for a subclass of ParseObject. */
+@Target({ElementType.TYPE})
 @Retention(RetentionPolicy.RUNTIME)
 @Inherited
+@Documented
 public @interface ParseClassName {
-  /**
-   * @return The Parse class name associated with the ParseObject subclass.
-   */
-  String value();
+    /** @return The Parse class name associated with the ParseObject subclass. */
+    String value();
 }

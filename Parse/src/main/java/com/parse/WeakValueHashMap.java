@@ -11,43 +11,41 @@ package com.parse;
 import java.lang.ref.WeakReference;
 import java.util.HashMap;
 
-/**
- * A HashMap where all the values are weak.
- */
-/** package */ class WeakValueHashMap<K, V> {
-  private HashMap<K, WeakReference<V>> map;
-  
-  public WeakValueHashMap() {
-    map = new HashMap<>();
-  }
+/** A HashMap where all the values are weak. */
+class WeakValueHashMap<K, V> {
+    private final HashMap<K, WeakReference<V>> map;
 
-  public void put(K key, V value) {
-    map.put(key, new WeakReference<>(value));
-  }
-  
-  /**
-   * Returns null if the key isn't in the map, or if it is an expired reference. If it is, then the
-   * reference is removed from the map.
-   */
-  public V get(K key) {
-    WeakReference<V> reference = map.get(key);
-    if (reference == null) {
-      return null;
+    public WeakValueHashMap() {
+        map = new HashMap<>();
     }
-    
-    V value = reference.get();
-    if (value == null) {
-      map.remove(key);
+
+    public void put(K key, V value) {
+        map.put(key, new WeakReference<>(value));
     }
-    
-    return value;
-  }
-  
-  public void remove(K key) {
-    map.remove(key);
-  }
-  
-  public void clear() {
-    map.clear();
-  }
+
+    /**
+     * Returns null if the key isn't in the map, or if it is an expired reference. If it is, then
+     * the reference is removed from the map.
+     */
+    public V get(K key) {
+        WeakReference<V> reference = map.get(key);
+        if (reference == null) {
+            return null;
+        }
+
+        V value = reference.get();
+        if (value == null) {
+            map.remove(key);
+        }
+
+        return value;
+    }
+
+    public void remove(K key) {
+        map.remove(key);
+    }
+
+    public void clear() {
+        map.clear();
+    }
 }

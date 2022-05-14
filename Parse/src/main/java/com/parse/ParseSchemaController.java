@@ -1,19 +1,17 @@
 package com.parse;
 
-import org.json.JSONArray;
-import org.json.JSONObject;
-
+import com.parse.boltsinternal.Continuation;
+import com.parse.boltsinternal.Task;
 import java.util.ArrayList;
 import java.util.List;
-
-import bolts.Continuation;
-import bolts.Task;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 /* Package */ class ParseSchemaController {
 
     private final ParseHttpClient restClient;
 
-    public ParseSchemaController(ParseHttpClient restClient){
+    public ParseSchemaController(ParseHttpClient restClient) {
         this.restClient = restClient;
     }
 
@@ -27,7 +25,7 @@ import bolts.Task;
 
                 List<ParseSchema> schemas = new ArrayList<>();
 
-                for (int i=0; i<arr.length(); i++){
+                for (int i = 0; i < arr.length(); i++) {
                     ParseSchema schema = new ParseSchema(arr.getJSONObject(i));
                     schemas.add(schema);
                 }
@@ -36,5 +34,4 @@ import bolts.Task;
             }
         });
     }
-
 }

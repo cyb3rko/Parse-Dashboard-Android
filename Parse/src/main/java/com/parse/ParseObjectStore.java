@@ -8,15 +8,15 @@
  */
 package com.parse;
 
-import bolts.Task;
+import com.parse.boltsinternal.Task;
 
-/** package */ interface ParseObjectStore<T extends ParseObject> {
+interface ParseObjectStore<T extends ParseObject> {
 
-  Task<T> getAsync();
+    Task<T> getAsync();
 
-  Task<Void> setAsync(T object);
+    Task<Void> setAsync(T object);
 
-  Task<Boolean> existsAsync();
+    Task<Boolean> existsAsync();
 
-  Task<Void> deleteAsync();
+    Task<Void> deleteAsync();
 }

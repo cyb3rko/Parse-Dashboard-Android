@@ -18,7 +18,7 @@ buildscript {
     }
 }
 
-apply plugin: "com.jfrog.bintray"
+//apply plugin: "com.jfrog.bintray"
 
 allprojects {
     repositories {
@@ -32,4 +32,15 @@ allprojects {
 
 task clean(type: Delete) {
     delete rootProject.buildDir
+}
+
+ext {
+    compileSdkVersion = 31
+
+    minSdkVersion = 17
+    targetSdkVersion = 31
+
+    mockitoCoreVersion = "3.12.4"
+    junitVersion = "4.13.2"
+    robolectricVersion = "4.7"
 }

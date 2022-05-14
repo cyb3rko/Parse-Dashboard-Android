@@ -10,20 +10,20 @@ package com.parse;
 
 import org.json.JSONObject;
 
-/**
- * Throws an exception if someone attemps to encode a {@code ParseObject}.
- */
-/** package */ class NoObjectsEncoder extends ParseEncoder {
+/** Throws an exception if someone attempts to encode a {@code ParseObject}. */
+class NoObjectsEncoder extends ParseEncoder {
 
-  // This class isn't really a Singleton, but since it has no state, it's more efficient to get the
-  // default instance.
-  private static final NoObjectsEncoder INSTANCE = new NoObjectsEncoder();
-  public static NoObjectsEncoder get() {
-    return INSTANCE;
-  }
+    // This class isn't really a Singleton, but since it has no state, it's more efficient to get
+    // the
+    // default instance.
+    private static final NoObjectsEncoder INSTANCE = new NoObjectsEncoder();
 
-  @Override
-  public JSONObject encodeRelatedObject(ParseObject object) {
-    throw new IllegalArgumentException("ParseObjects not allowed here");
-  }
+    public static NoObjectsEncoder get() {
+        return INSTANCE;
+    }
+
+    @Override
+    public JSONObject encodeRelatedObject(ParseObject object) {
+        throw new IllegalArgumentException("ParseObjects not allowed here");
+    }
 }

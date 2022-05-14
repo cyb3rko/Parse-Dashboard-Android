@@ -13,11 +13,21 @@ import java.util.Map;
 
 public class ParseRESTSchemaCommand extends ParseRESTCommand {
 
-    public static ParseRESTSchemaCommand getParseSchemasCommand(String sessionToken){
-        return new ParseRESTSchemaCommand("schemas/", ParseHttpRequest.Method.GET, null, sessionToken);
+    public static ParseRESTSchemaCommand getParseSchemasCommand(String sessionToken) {
+        return new ParseRESTSchemaCommand(
+                "schemas/",
+                ParseHttpRequest.Method.GET,
+                null,
+                sessionToken
+        );
     }
 
-    private ParseRESTSchemaCommand(String httpPath, ParseHttpRequest.Method httpMethod, Map<String, ?> parameters, String sessionToken) {
+    private ParseRESTSchemaCommand(
+            String httpPath,
+            ParseHttpRequest.Method httpMethod,
+            Map<String, ?> parameters,
+            String sessionToken
+    ) {
         super(httpPath, httpMethod, parameters, sessionToken);
     }
 }

@@ -8,52 +8,50 @@
  */
 package com.parse;
 
+import com.parse.boltsinternal.Task;
+import java.util.Map;
 import org.json.JSONObject;
 
-import java.util.Map;
+class ParseCloudCodeController {
 
-import bolts.Continuation;
-import bolts.Task;
+    /* package for test */ final ParseHttpClient restClient;
 
-/** package */ class ParseCloudCodeController {
+    public ParseCloudCodeController(ParseHttpClient restClient) {
+        this.restClient = restClient;
+    }
 
-  /* package for test */ final ParseHttpClient restClient;
+    public <T> Task<T> callFunctionInBackground(
+            final String name, final Map<String, ?> params, String sessionToken) {
+        ParseRESTCommand command =
+                ParseRESTCloudCommand.callFunctionCommand(name, params, sessionToken);
+        return command.executeAsync(restClient)
+                .onSuccess(
+                        task -> {
+                            @SuppressWarnings("unchecked")
+                            T result = (T) convertCloudResponse(task.getResult());
+                            return result;
+                        });
+    }
 
-  public ParseCloudCodeController(ParseHttpClient restClient) {
-    this.restClient = restClient;
-  }
+    /*
+     * Decodes any Parse data types in the result of the cloud function call.
+     */
+    /* package for test */ Object convertCloudResponse(Object result) {
+        if (result instanceof JSONObject) {
+            JSONObject jsonResult = (JSONObject) result;
+            // We want to make sure we pass back a null result as null, and not a JSONObject
+            if (jsonResult.isNull("result")) {
+                return null;
+            }
+            result = jsonResult.opt("result");
+        }
 
-  public <T> Task<T> callFunctionInBackground(final String name,
-      final Map<String, ?> params, String sessionToken) {
-    ParseRESTCommand command = ParseRESTCloudCommand.callFunctionCommand(
-        name,
-        params,
-        sessionToken);
-    return command.executeAsync(restClient).onSuccess(new Continuation<JSONObject, T>() {
-      @Override
-      public T then(Task<JSONObject> task) throws Exception {
-        @SuppressWarnings("unchecked")
-        T result = (T) convertCloudResponse(task.getResult());
+        ParseDecoder decoder = ParseDecoder.get();
+        Object finalResult = decoder.decode(result);
+        if (finalResult != null) {
+            return finalResult;
+        }
+
         return result;
-      }
-    });
-  }
-
-  /*
-   * Decodes any Parse data types in the result of the cloud function call.
-   */
-  /* package for test */ Object convertCloudResponse(Object result) {
-    if (result instanceof JSONObject) {
-      JSONObject jsonResult = (JSONObject)result;
-      result = jsonResult.opt("result");
     }
-
-    ParseDecoder decoder = ParseDecoder.get();
-    Object finalResult = decoder.decode(result);
-    if (finalResult != null) {
-      return finalResult;
-    }
-
-    return result;
-  }
 }

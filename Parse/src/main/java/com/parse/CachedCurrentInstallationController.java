@@ -8,155 +8,137 @@
  */
 package com.parse;
 
-import bolts.Continuation;
-import bolts.Task;
+import com.parse.boltsinternal.Task;
 
-/** package */ class CachedCurrentInstallationController
-    implements ParseCurrentInstallationController {
+class CachedCurrentInstallationController implements ParseCurrentInstallationController {
 
-  /* package */ static final String TAG = "com.parse.CachedCurrentInstallationController";
+    /* package */ static final String TAG = "com.parse.CachedCurrentInstallationController";
 
-  /*
-   * Note about lock ordering:
-   *
-   * You must NOT acquire the ParseInstallation instance mutex (the "mutex" field in ParseObject)
-   * while holding this current installation lock. (We used to use the ParseInstallation.class lock,
-   * but moved on to an explicit lock object since anyone could acquire the ParseInstallation.class
-   * lock as ParseInstallation is a public class.) Acquiring the instance mutex while holding this
-   * current installation lock will lead to a deadlock. Here is an example:
-   * https://phabricator.fb.com/P3251091
-   */
-  private final Object mutex = new Object();
+    /*
+     * Note about lock ordering:
+     *
+     * You must NOT acquire the ParseInstallation instance mutex (the "mutex" field in ParseObject)
+     * while holding this current installation lock. (We used to use the ParseInstallation.class lock,
+     * but moved on to an explicit lock object since anyone could acquire the ParseInstallation.class
+     * lock as ParseInstallation is a public class.) Acquiring the instance mutex while holding this
+     * current installation lock will lead to a deadlock.
+     */
+    private final Object mutex = new Object();
 
-  private final TaskQueue taskQueue = new TaskQueue();
+    private final TaskQueue taskQueue = new TaskQueue();
 
-  private final ParseObjectStore<ParseInstallation> store;
-  private final InstallationId installationId;
+    private final ParseObjectStore<ParseInstallation> store;
+    private final InstallationId installationId;
 
-  // The "current installation" is the installation for this device. Protected by
-  // mutex.
-  /* package for test */ ParseInstallation currentInstallation;
+    // The "current installation" is the installation for this device. Protected by
+    // mutex.
+    /* package for test */ ParseInstallation currentInstallation;
 
-  public CachedCurrentInstallationController(
-      ParseObjectStore<ParseInstallation> store, InstallationId installationId) {
-    this.store = store;
-    this.installationId = installationId;
-  }
-
-  @Override
-  public Task<Void> setAsync(final ParseInstallation installation) {
-    if (!isCurrent(installation)) {
-      return Task.forResult(null);
+    public CachedCurrentInstallationController(
+            ParseObjectStore<ParseInstallation> store, InstallationId installationId) {
+        this.store = store;
+        this.installationId = installationId;
     }
 
-    return taskQueue.enqueue(new Continuation<Void, Task<Void>>() {
-      @Override
-      public Task<Void> then(Task<Void> toAwait) throws Exception {
-        return toAwait.continueWithTask(new Continuation<Void, Task<Void>>() {
-          @Override
-          public Task<Void> then(Task<Void> task) throws Exception {
-            return store.setAsync(installation);
-          }
-        }).continueWithTask(new Continuation<Void, Task<Void>>() {
-          @Override
-          public Task<Void> then(Task<Void> task) throws Exception {
-            installationId.set(installation.getInstallationId());
-            return task;
-          }
-        }, ParseExecutors.io());
-      }
-    });
-  }
+    @Override
+    public Task<Void> setAsync(final ParseInstallation installation) {
+        if (!isCurrent(installation)) {
+            return Task.forResult(null);
+        }
 
-  @Override
-  public Task<ParseInstallation> getAsync() {
-    synchronized (mutex) {
-      if (currentInstallation != null) {
-        return Task.forResult(currentInstallation);
-      }
+        return taskQueue.enqueue(
+                toAwait ->
+                        toAwait.continueWithTask(task -> store.setAsync(installation))
+                                .continueWithTask(
+                                        task -> {
+                                            installationId.set(installation.getInstallationId());
+                                            return task;
+                                        },
+                                        ParseExecutors.io()));
     }
 
-    return taskQueue.enqueue(new Continuation<Void, Task<ParseInstallation>>() {
-      @Override
-      public Task<ParseInstallation> then(Task<Void> toAwait) throws Exception {
-        return toAwait.continueWithTask(new Continuation<Void, Task<ParseInstallation>>() {
-          @Override
-          public Task<ParseInstallation> then(Task<Void> task) throws Exception {
-            synchronized (mutex) {
-              if (currentInstallation != null) {
+    @Override
+    public Task<ParseInstallation> getAsync() {
+        synchronized (mutex) {
+            if (currentInstallation != null) {
                 return Task.forResult(currentInstallation);
-              }
             }
+        }
 
-            return store.getAsync().continueWith(new Continuation<ParseInstallation, ParseInstallation>() {
-              @Override
-              public ParseInstallation then(Task<ParseInstallation> task) throws Exception {
-                ParseInstallation current = task.getResult();
-                if (current == null) {
-                  current = ParseObject.create(ParseInstallation.class);
-                  current.updateDeviceInfo(installationId);
-                } else {
-                  installationId.set(current.getInstallationId());
-                  PLog.v(TAG, "Successfully deserialized Installation object");
-                }
+        return taskQueue.enqueue(
+                toAwait ->
+                        toAwait.continueWithTask(
+                                task -> {
+                                    synchronized (mutex) {
+                                        if (currentInstallation != null) {
+                                            return Task.forResult(currentInstallation);
+                                        }
+                                    }
 
-                synchronized (mutex) {
-                  currentInstallation = current;
-                }
-                return current;
-              }
-            }, ParseExecutors.io());
-          }
-        });
-      }
-    });
-  }
+                                    return store.getAsync()
+                                            .continueWith(
+                                                    task1 -> {
+                                                        ParseInstallation current =
+                                                                task1.getResult();
+                                                        if (current == null) {
+                                                            current =
+                                                                    ParseObject.create(
+                                                                            ParseInstallation
+                                                                                    .class);
+                                                            current.updateDeviceInfo(
+                                                                    installationId);
+                                                        } else {
+                                                            installationId.set(
+                                                                    current.getInstallationId());
+                                                            PLog.v(
+                                                                    TAG,
+                                                                    "Successfully deserialized Installation object");
+                                                        }
 
-  @Override
-  public Task<Boolean> existsAsync() {
-    synchronized (mutex) {
-      if (currentInstallation != null) {
-        return Task.forResult(true);
-      }
+                                                        synchronized (mutex) {
+                                                            currentInstallation = current;
+                                                        }
+                                                        return current;
+                                                    },
+                                                    ParseExecutors.io());
+                                }));
     }
 
-    return taskQueue.enqueue(new Continuation<Void, Task<Boolean>>() {
-      @Override
-      public Task<Boolean> then(Task<Void> toAwait) throws Exception {
-        return toAwait.continueWithTask(new Continuation<Void, Task<Boolean>>() {
-          @Override
-          public Task<Boolean> then(Task<Void> task) throws Exception {
-            return store.existsAsync();
-          }
-        });
-      }
-    });
-  }
+    @Override
+    public Task<Boolean> existsAsync() {
+        synchronized (mutex) {
+            if (currentInstallation != null) {
+                return Task.forResult(true);
+            }
+        }
 
-  @Override
-  public void clearFromMemory() {
-    synchronized (mutex) {
-      currentInstallation = null;
+        return taskQueue.enqueue(toAwait -> toAwait.continueWithTask(task -> store.existsAsync()));
     }
-  }
 
-  @Override
-  public void clearFromDisk() {
-    synchronized (mutex) {
-      currentInstallation = null;
+    @Override
+    public void clearFromMemory() {
+        synchronized (mutex) {
+            currentInstallation = null;
+        }
     }
-    try {
-      installationId.clear();
-      ParseTaskUtils.wait(store.deleteAsync());
-    } catch (ParseException e) {
-      // ignored
-    }
-  }
 
-  @Override
-  public boolean isCurrent(ParseInstallation installation) {
-    synchronized (mutex) {
-      return  currentInstallation == installation;
+    @Override
+    public void clearFromDisk() {
+        synchronized (mutex) {
+            currentInstallation = null;
+        }
+        try {
+            installationId.clear();
+            ParseTaskUtils.wait(store.deleteAsync());
+        } catch (ParseException e) {
+            // ignored
+        }
     }
-  }
+
+    @Override
+    public boolean isCurrent(ParseInstallation installation) {
+        synchronized (mutex) {
+            return currentInstallation == installation;
+        }
+    }
 }

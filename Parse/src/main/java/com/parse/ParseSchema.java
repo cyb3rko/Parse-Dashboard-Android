@@ -2,6 +2,9 @@ package com.parse;
 
 import android.util.Log;
 
+import com.parse.boltsinternal.Continuation;
+import com.parse.boltsinternal.Task;
+
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -9,9 +12,6 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
-
-import bolts.Continuation;
-import bolts.Task;
 
 public class ParseSchema {
 
@@ -157,12 +157,11 @@ public class ParseSchema {
     }
 
     public static FieldType fieldTypeFromString(String type){
-        try{
+        try {
             return FieldType.valueOf(type);
         } catch (IllegalArgumentException e){
             Log.w(TAG, "No matching field type found for type: " + type);
             return FieldType.None;
         }
     }
-
 }

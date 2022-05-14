@@ -13,8 +13,8 @@ android {
     compileSdkVersion 31
     defaultConfig {
         applicationId "com.galtashma.parsedashboard"
-        minSdkVersion 17
-        targetSdkVersion 31
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 5
         versionName "1.2.1"
         testInstrumentationRunner "android.support.test.runner.AndroidJUnitRunner"

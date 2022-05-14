@@ -8,6 +8,5 @@
  */
 package com.parse;
 
-/** package */ interface ParseCurrentInstallationController
-    extends ParseObjectCurrentController<ParseInstallation> {
-}
+interface ParseCurrentInstallationController
+        extends ParseObjectCurrentController<ParseInstallation> {}

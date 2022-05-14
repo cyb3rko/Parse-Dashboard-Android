@@ -8,32 +8,31 @@
  */
 package com.parse;
 
-import org.junit.Test;
-
-import java.util.Date;
-
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNull;
 
+import java.util.Date;
+import org.junit.Test;
+
 public class ParseImpreciseDateFormatTest {
-  @Test
-  public void testParse() {
-    String string = "2015-05-13T11:08:01Z";
-    Date date = ParseImpreciseDateFormat.getInstance().parse(string);
-    assertEquals(1431515281000L, date.getTime());
-  }
+    @Test
+    public void testParse() {
+        String string = "2015-05-13T11:08:01Z";
+        Date date = ParseImpreciseDateFormat.getInstance().parse(string);
+        assertEquals(1431515281000L, date.getTime());
+    }
 
-  @Test
-  public void testParseInvalid() {
-    String string = "2015-05-13T11:08:01.123Z";
-    Date date = ParseImpreciseDateFormat.getInstance().parse(string);
-    assertNull(date);
-  }
+    @Test
+    public void testParseInvalid() {
+        String string = "2015-05-13T11:08:01.123Z";
+        Date date = ParseImpreciseDateFormat.getInstance().parse(string);
+        assertNull(date);
+    }
 
-  @Test
-  public void testFormat() {
-    Date date = new Date(1431515281000L);
-    String string = ParseImpreciseDateFormat.getInstance().format(date);
-    assertEquals("2015-05-13T11:08:01Z", string);
-  }
+    @Test
+    public void testFormat() {
+        Date date = new Date(1431515281000L);
+        String string = ParseImpreciseDateFormat.getInstance().format(date);
+        assertEquals("2015-05-13T11:08:01Z", string);
+    }
 }
